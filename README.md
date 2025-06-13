@@ -1,4 +1,4 @@
-# CourierATS
+# RRS
 An ATS system for delivery drivers
 
 Summary:
