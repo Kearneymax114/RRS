@@ -1,0 +1,431 @@
+// Setup function to create and initialize the copy sheet
+function setupCopySheet() {
+  try {
+    // Log the start of execution
+    Logger.log('Starting setupCopySheet function');
+    
+    // Get the active spreadsheet and log its URL
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      throw new Error('Could not access active spreadsheet');
+    }
+    Logger.log('Successfully accessed spreadsheet: ' + ss.getName());
+
+    var rawSheetName = 'RRS Driver Application Form';
+    var copySheetName = 'Editable Candidate List';
+    
+    // Get or create the copy sheet
+    var rawSheet = ss.getSheetByName(rawSheetName);
+    if (!rawSheet) {
+      throw new Error('Could not find source sheet: ' + rawSheetName);
+    }
+    Logger.log('Successfully found source sheet: ' + rawSheetName);
+
+    var copySheet = ss.getSheetByName(copySheetName);
+    if (!copySheet) {
+      Logger.log('Copy sheet not found, creating new sheet: ' + copySheetName);
+      copySheet = ss.insertSheet(copySheetName);
+    }
+    Logger.log('Successfully accessed/created copy sheet: ' + copySheetName);
+
+    // Get the headers we want in our copy sheet (the keys from headerMapping)
+    var headerMapping = {
+      "first_name": "First name",
+      "last_name": "Last name",
+      "english_speaking": "Do you speak English?",
+      "start_timeframe": "How soon are you able to start work?",
+      "email": "Email",
+      "phone_number": "Phone number",
+      "dl_three_years": "Have you had your US Driver License for 3 or more years?",
+      "package_xp_notes": "Please provide more information on your previous package delivery experience.",
+      "large_vehicle_xp": "Do you have previous experience driving a P1200 Step-van or something similar?",
+      "availability": "What is your availability throughout the week?",
+      "clean_driving_record": "Have you maintained a clean *driving record* for the past three (3) years? ",
+      "clean_criminal_record": "Have you maintained a clean *criminal record* over the last seven (7) years?",
+      "weight_capacity": "Are you able to maneuver & deliver packages up to 150 pounds?",
+      "package_xp": "Do you have previous package delivery experience?",
+      "marijuana": "Do you consume marijuana?",
+      "vehicle_xp_notes": "Please provide more information on the vehicle(s) you have experience with.",
+      "us_authorized": "Are you legally authorized to work in the United States?",
+      "submission_token": "Token",
+      "submission_datetime": "Submitted At",
+      "status": null,
+      "interview_date": null,
+      "interview_time": null,
+      "last_updated": null,
+      "rejection_email_sent": null,
+      "rejection_email_sent_timestamp": null,
+      "interview_email_sent": null,
+      "interview_email_sent_timestamp": null,
+      "candidate_id": null,
+      "notes": null
+    };
+
+    // Log existing headers in raw sheet
+    var rawHeaders = rawSheet.getRange(1, 1, 1, rawSheet.getLastColumn()).getValues()[0];
+    Logger.log('Raw sheet headers: ' + JSON.stringify(rawHeaders));
+
+    // Set up headers in the copy sheet
+    var headers = Object.keys(headerMapping);
+    copySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    Logger.log('Successfully set up headers in copy sheet');
+    
+    // Copy existing data if needed
+    if (rawSheet.getLastRow() > 1) {
+      Logger.log('Found existing data in raw sheet, starting copy process');
+      // Get raw data
+      var rawData = rawSheet.getRange(2, 1, rawSheet.getLastRow() - 1, rawSheet.getLastColumn()).getValues();
+      
+      // Create index map for raw headers
+      var rawHeaderIndexMap = {};
+      rawHeaders.forEach(function(header, idx) {
+        rawHeaderIndexMap[header] = idx;
+      });
+      
+      // Transform each row according to the mapping
+      var transformedData = rawData.map(function(row) {
+        return headers.map(function(copyHeader) {
+          var rawHeader = headerMapping[copyHeader];
+          if (!rawHeader || rawHeaderIndexMap[rawHeader] === undefined) {
+            Logger.log('Warning: Could not find mapping for header: ' + copyHeader);
+            return '';
+          }
+          return row[rawHeaderIndexMap[rawHeader]];
+        });
+      });
+      
+      // Append transformed data if there is any
+      if (transformedData.length > 0) {
+        copySheet.getRange(2, 1, transformedData.length, headers.length).setValues(transformedData);
+        Logger.log('Successfully copied ' + transformedData.length + ' rows of existing data');
+        
+        // Set up the status column validation
+        var statusColIndex = headers.indexOf('status') + 1;
+        var rule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(STATUS_VALUES, true)
+          .build();
+
+        // Apply validation to the entire status column (excluding header)
+        var statusRange = copySheet.getRange(2, statusColIndex, transformedData.length, 1);
+        statusRange.setDataValidation(rule);
+        statusRange.setValue('new');
+
+        // Format interview_date column as date
+        var dateColIndex = headers.indexOf('interview_date') + 1;
+        var dateRange = copySheet.getRange(2, dateColIndex, transformedData.length, 1);
+        dateRange.setNumberFormat('M/d/yyyy');
+
+        // Format interview_time column as time
+        var timeColIndex = headers.indexOf('interview_time') + 1;
+        var timeRange = copySheet.getRange(2, timeColIndex, transformedData.length, 1);
+        timeRange.setNumberFormat('h:mm AM/PM "PST"');
+
+        // Format boolean columns
+        var rejectionEmailColIndex = headers.indexOf('rejection_email_sent') + 1;
+        var interviewEmailColIndex = headers.indexOf('interview_email_sent') + 1;
+        var booleanRule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(['TRUE', 'FALSE'], true)
+          .build();
+        
+        copySheet.getRange(2, rejectionEmailColIndex, transformedData.length, 1).setDataValidation(booleanRule);
+        copySheet.getRange(2, interviewEmailColIndex, transformedData.length, 1).setDataValidation(booleanRule);
+
+        // Set up candidate_id column with unique identifiers
+        var candidateIdColIndex = headers.indexOf('candidate_id') + 1;
+        var candidateIdRange = copySheet.getRange(2, candidateIdColIndex, transformedData.length, 1);
+        var candidateIds = transformedData.map(function() {
+          return Math.floor(100000 + Math.random() * 900000); // 6-digit random number
+        });
+        candidateIdRange.setValues(candidateIds.map(function(id) { return [id]; }));
+      }
+    }
+  } catch (error) {
+    Logger.log('Error in setupCopySheet: ' + error.toString());
+    throw error;
+  }
+}
+
+// Add this new function to handle the last_updated column
+function onEdit(e) {
+  var sheet = e.source.getActiveSheet();
+  if (sheet.getName() !== 'Editable Candidate List') return;
+  
+  var range = e.range;
+  var col = range.getColumn();
+  var row = range.getRow();
+  
+  // Get headers
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  
+  // Check if edited column is either 'status' or 'notes'
+  if (headers[col-1] === 'status' || headers[col-1] === 'notes') {
+    // Find last_updated column
+    var lastUpdatedCol = headers.indexOf('last_updated') + 1;
+    if (lastUpdatedCol > 0) {
+      // Update the last_updated cell with current timestamp
+      var timestamp = new Date();
+      sheet.getRange(row, lastUpdatedCol).setValue(timestamp).setNumberFormat('M/d/yyyy h:mm:ss AM/PM');
+    }
+  }
+}
+
+// Function to handle new form submissions
+function onFormSubmit(e) {
+  try {
+    // Log the start of execution
+    Logger.log('Starting onFormSubmit function');
+    
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var rawSheet = ss.getSheetByName(SHEET_NAMES.RAW_FORM);
+    var copySheet = ss.getSheetByName(SHEET_NAMES.CANDIDATE_LIST);
+    
+    if (!rawSheet || !copySheet) {
+      throw new Error('Required sheets not found');
+    }
+
+    // Get the row that was just added
+    var newRow = e.range.getRow();
+    var newData = rawSheet.getRange(newRow, 1, 1, rawSheet.getLastColumn()).getValues()[0];
+    
+    // Get headers from both sheets
+    var rawHeaders = rawSheet.getRange(1, 1, 1, rawSheet.getLastColumn()).getValues()[0];
+    var copyHeaders = copySheet.getRange(1, 1, 1, copySheet.getLastColumn()).getValues()[0];
+    
+    // Create index map for raw headers
+    var rawHeaderIndexMap = {};
+    rawHeaders.forEach(function(header, idx) {
+      rawHeaderIndexMap[header] = idx;
+    });
+    
+    // Create the header mapping (same as in setupCopySheet)
+    var headerMapping = {
+      "first_name": "First name",
+      "last_name": "Last name",
+      "english_speaking": "Do you speak English?",
+      "start_timeframe": "How soon are you able to start work?",
+      "email": "Email",
+      "phone_number": "Phone number",
+      "dl_three_years": "Have you had your US Driver License for 3 or more years?",
+      "package_xp_notes": "Please provide more information on your previous package delivery experience.",
+      "large_vehicle_xp": "Do you have previous experience driving a P1200 Step-van or something similar?",
+      "availability": "What is your availability throughout the week?",
+      "clean_driving_record": "Have you maintained a clean *driving record* for the past three (3) years? ",
+      "clean_criminal_record": "Have you maintained a clean *criminal record* over the last seven (7) years?",
+      "weight_capacity": "Are you able to maneuver & deliver packages up to 150 pounds?",
+      "package_xp": "Do you have previous package delivery experience?",
+      "marijuana": "Do you consume marijuana?",
+      "vehicle_xp_notes": "Please provide more information on the vehicle(s) you have experience with.",
+      "us_authorized": "Are you legally authorized to work in the United States?",
+      "submission_token": "Token",
+      "submission_datetime": "Submitted At",
+      "status": null,
+      "interview_date": null,
+      "interview_time": null,
+      "last_updated": null,
+      "rejection_email_sent": null,
+      "rejection_email_sent_timestamp": null,
+      "interview_email_sent": null,
+      "interview_email_sent_timestamp": null,
+      "candidate_id": null,
+      "notes": null
+    };
+    
+    // Transform the new row according to the mapping
+    var transformedRow = copyHeaders.map(function(copyHeader) {
+      var rawHeader = headerMapping[copyHeader];
+      if (!rawHeader || rawHeaderIndexMap[rawHeader] === undefined) {
+        return '';
+      }
+      return newData[rawHeaderIndexMap[rawHeader]];
+    });
+    
+    // Add the new row to the copy sheet
+    var newRowNumber = copySheet.getLastRow() + 1;
+    copySheet.getRange(newRowNumber, 1, 1, transformedRow.length).setValues([transformedRow]);
+    
+    // Apply formatting and validation to the new row
+    var statusColIndex = copyHeaders.indexOf('status') + 1;
+    var dateColIndex = copyHeaders.indexOf('interview_date') + 1;
+    var timeColIndex = copyHeaders.indexOf('interview_time') + 1;
+    var rejectionEmailColIndex = copyHeaders.indexOf('rejection_email_sent') + 1;
+    var interviewEmailColIndex = copyHeaders.indexOf('interview_email_sent') + 1;
+    var candidateIdColIndex = copyHeaders.indexOf('candidate_id') + 1;
+    
+    // Set status validation and initial value
+    var statusRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(STATUS_VALUES, true)
+      .build();
+    copySheet.getRange(newRowNumber, statusColIndex).setDataValidation(statusRule).setValue('new');
+    
+    // Format date and time columns
+    copySheet.getRange(newRowNumber, dateColIndex).setNumberFormat('M/d/yyyy');
+    copySheet.getRange(newRowNumber, timeColIndex).setNumberFormat('h:mm AM/PM "PST"');
+    
+    // Set boolean validation
+    var booleanRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['TRUE', 'FALSE'], true)
+      .build();
+    copySheet.getRange(newRowNumber, rejectionEmailColIndex).setDataValidation(booleanRule);
+    copySheet.getRange(newRowNumber, interviewEmailColIndex).setDataValidation(booleanRule);
+    
+    // Generate and set candidate ID
+    var candidateId = Math.floor(100000 + Math.random() * 900000); // 6-digit random number
+    copySheet.getRange(newRowNumber, candidateIdColIndex).setValue(candidateId);
+    
+    Logger.log('Successfully copied new submission to row ' + newRowNumber);
+    
+  } catch (error) {
+    Logger.log('Error in onFormSubmit: ' + error.toString());
+    throw error;
+  }
+}
+
+// Function to create the form submission trigger
+function createFormTrigger() {
+  // Delete any existing triggers for onFormSubmit
+  var existingTriggers = ScriptApp.getProjectTriggers();
+  existingTriggers.forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'onFormSubmit') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  
+  // Create new trigger
+  ScriptApp.newTrigger('onFormSubmit')
+    .forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet())
+    .onFormSubmit()
+    .create();
+    
+  Logger.log('Form submission trigger created successfully');
+}
+
+// Function to check for and copy new entries
+function checkForNewEntries() {
+  try {
+    Logger.log('Starting checkForNewEntries function');
+    
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var rawSheet = ss.getSheetByName(SHEET_NAMES.RAW_FORM);
+    var copySheet = ss.getSheetByName(SHEET_NAMES.CANDIDATE_LIST);
+    
+    if (!rawSheet || !copySheet) {
+      throw new Error('Required sheets not found');
+    }
+
+    // Get the last row number from both sheets
+    var rawLastRow = rawSheet.getLastRow();
+    var copyLastRow = copySheet.getLastRow();
+    
+    // If there are no new entries, exit
+    if (rawLastRow <= copyLastRow) {
+      Logger.log('No new entries found');
+      return;
+    }
+
+    // Get headers from both sheets
+    var rawHeaders = rawSheet.getRange(1, 1, 1, rawSheet.getLastColumn()).getValues()[0];
+    var copyHeaders = copySheet.getRange(1, 1, 1, copySheet.getLastColumn()).getValues()[0];
+    
+    // Get new entries
+    var newData = rawSheet.getRange(copyLastRow + 1, 1, rawLastRow - copyLastRow, rawSheet.getLastColumn()).getValues();
+    
+    // Process each new row
+    newData.forEach(function(row) {
+      processNewEntry(row, rawHeaders, copyHeaders, copySheet);
+    });
+    
+    Logger.log('Successfully processed ' + (rawLastRow - copyLastRow) + ' new entries');
+    
+  } catch (error) {
+    Logger.log('Error in checkForNewEntries: ' + error.toString());
+    throw error;
+  }
+}
+
+function processNewEntry(newData, rawHeaders, copyHeaders, copySheet) {
+  // Create index map for raw headers
+  var rawHeaderIndexMap = {};
+  rawHeaders.forEach(function(header, idx) {
+    rawHeaderIndexMap[header] = idx;
+  });
+  
+  // Create the complete header mapping
+  var headerMapping = {
+    "first_name": "First name",
+    "last_name": "Last name",
+    "english_speaking": "Do you speak English?",
+    "start_timeframe": "How soon are you able to start work?",
+    "email": "Email",
+    "phone_number": "Phone number",
+    "dl_three_years": "Have you had your US Driver License for 3 or more years?",
+    "package_xp_notes": "Please provide more information on your previous package delivery experience.",
+    "large_vehicle_xp": "Do you have previous experience driving a P1200 Step-van or something similar?",
+    "availability": "What is your availability throughout the week?",
+    "clean_driving_record": "Have you maintained a clean *driving record* for the past three (3) years? ",
+    "clean_criminal_record": "Have you maintained a clean *criminal record* over the last seven (7) years?",
+    "weight_capacity": "Are you able to maneuver & deliver packages up to 150 pounds?",
+    "package_xp": "Do you have previous package delivery experience?",
+    "marijuana": "Do you consume marijuana?",
+    "vehicle_xp_notes": "Please provide more information on the vehicle(s) you have experience with.",
+    "us_authorized": "Are you legally authorized to work in the United States?",
+    "submission_token": "Token",
+    "submission_datetime": "Submitted At",
+    "status": null,
+    "interview_date": null,
+    "interview_time": null,
+    "last_updated": null,
+    "rejection_email_sent": null,
+    "rejection_email_sent_timestamp": null,
+    "interview_email_sent": null,
+    "interview_email_sent_timestamp": null,
+    "candidate_id": null,
+    "notes": null
+  };
+  
+  // Transform the row
+  var transformedRow = copyHeaders.map(function(copyHeader) {
+    var rawHeader = headerMapping[copyHeader];
+    if (!rawHeader || rawHeaderIndexMap[rawHeader] === undefined) {
+      return '';
+    }
+    return newData[rawHeaderIndexMap[rawHeader]];
+  });
+  
+  // Add the new row
+  var newRowNumber = copySheet.getLastRow() + 1;
+  copySheet.getRange(newRowNumber, 1, 1, transformedRow.length).setValues([transformedRow]);
+  
+  // Apply formatting
+  applyRowFormatting(copySheet, newRowNumber, copyHeaders);
+}
+
+function applyRowFormatting(sheet, rowNumber, headers) {
+  // Set up status validation and initial value
+  var statusColIndex = headers.indexOf('status') + 1;
+  var dateColIndex = headers.indexOf('interview_date') + 1;
+  var timeColIndex = headers.indexOf('interview_time') + 1;
+  var rejectionEmailColIndex = headers.indexOf('rejection_email_sent') + 1;
+  var interviewEmailColIndex = headers.indexOf('interview_email_sent') + 1;
+  var candidateIdColIndex = headers.indexOf('candidate_id') + 1;
+  
+  // Status validation
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(STATUS_VALUES, true)
+    .build();
+  sheet.getRange(rowNumber, statusColIndex).setDataValidation(statusRule).setValue('new');
+  
+  // Date/Time formatting
+  sheet.getRange(rowNumber, dateColIndex).setNumberFormat('M/d/yyyy');
+  sheet.getRange(rowNumber, timeColIndex).setNumberFormat('h:mm AM/PM "PST"');
+  
+  // Boolean validation
+  var booleanRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['TRUE', 'FALSE'], true)
+    .build();
+  sheet.getRange(rowNumber, rejectionEmailColIndex).setDataValidation(booleanRule);
+  sheet.getRange(rowNumber, interviewEmailColIndex).setDataValidation(booleanRule);
+  
+  // Generate candidate ID
+  var candidateId = Math.floor(100000 + Math.random() * 900000);
+  sheet.getRange(rowNumber, candidateIdColIndex).setValue(candidateId);
+}
